@@ -1,3 +1,32 @@
+function Counter(props) {
+  const [count, setCount] = useState(0);
+  const joe = {name: 'joe', age: 11};
+  const ann = {name: 'ann', age: 32};
+  const [user, setUser] = useState({name: 'joe', age: 11})
+  return createElement(
+    'h1',
+    {
+      onClick: () => {
+        setCount(count => count + 1);
+        setUser(u => u.name === 'joe' ? ann : joe);
+      }
+    },
+    count,
+    createElement(
+      'div',
+      null,
+      'name: ',
+      user.name,
+    ),
+    createElement(
+      'div',
+      null,
+      'age: ',
+      user.age
+    )
+  )
+}
+
 function App(props) {
   return createElement(
     'h3',
@@ -12,7 +41,7 @@ function App(props) {
   )
 }
 
-const element = createElement(App, {
+const element = createElement(Counter, {
   name: 'joe'
 })
 
@@ -104,11 +133,7 @@ function createDom(element) {
   ) : (
     document.createElement(element.type)
   )
-  Object.keys(element.props).forEach(key => {
-    if (key !== 'children') {
-      node[key] = element.props[key];
-    }
-  })
+  updateDom(node, {}, element.props);
   return node;
 }
 
@@ -135,8 +160,53 @@ function performWorkUnit(fiber) {
   }
 }
 
+let wipFiber = null;
+let hookIndex = null;
+
 function handleFunctionFiber(fiber) {
+  wipFiber = fiber;
+  hookIndex = 0;
+  wipFiber.hooks = [];
   reconcileChildren(fiber, [fiber.type(fiber.props)]);
+}
+
+function useState(initialState) {
+  /* 
+    useState肯定是在函数组件中调用的
+    而我们只在handleFunctionFiber中调用函数组件
+    所以此时下面三条语句肯定已经执行完了：
+      wipFiber = fiber;
+      hookIndex = 0;
+      wipFiber.hooks = [];
+  */
+  const oldHook = wipFiber.oldFiber && wipFiber.oldFiber.hooks && wipFiber.oldFiber.hooks[hookIndex];
+  let currentState = oldHook ? oldHook.state : initialState;
+  const currentHook = {
+    state: currentState,
+    actions: []
+  }
+  oldHook && oldHook.actions.forEach(action => action(currentHook));
+  wipFiber.hooks.push(currentHook);
+  function setState(setFunc) {
+    let newState = setFunc(currentHook.state);
+    if (newState !== currentHook.state) {
+      currentHook.actions.push(ch => {
+        ch.state = newState;
+      })
+      wipRoot = new Fiber({
+        dom: wipFiber.dom,
+        props: wipFiber.props,
+        oldFiber: wipFiber,
+        type: wipFiber.type,
+        props: wipFiber.props,
+        father: wipFiber.father,
+        nextSibling: wipFiber.nextSibling
+      });
+      nextWorkUnit = wipRoot;
+    }
+  }
+  hookIndex++;
+  return [currentHook.state, setState]
 }
 
 function handleHostFiber(fiber) {
@@ -146,7 +216,7 @@ function handleHostFiber(fiber) {
   reconcileChildren(fiber, fiber.props.children);
 }
 function reconcileChildren(fiber, children) {
-  const oldFiber = fiber.oldFiber && fiber.oldFiber.firstChild;
+  let oldFiber = fiber.oldFiber && fiber.oldFiber.firstChild;
   let index = 0;
   let lastFiber = null;
   while (index < children.length || oldFiber) {
